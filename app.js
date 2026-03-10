@@ -16,6 +16,7 @@
   const stage = document.getElementById("stage");
   const status = document.getElementById("status");
   const statusBadge = document.getElementById("statusBadge");
+  const appVersion = document.getElementById("appVersion");
   const results = document.getElementById("results");
   const ctx = overlay.getContext("2d");
 
@@ -234,6 +235,25 @@
       console.error(error);
       setStatus(`模型載入失敗：${error.message}`, "warn");
       updateButtons();
+    }
+  }
+
+  async function loadAppVersion() {
+    if (!appVersion) return;
+    try {
+      const res = await fetch(`./version.json?t=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) {
+        appVersion.textContent = "v?";
+        return;
+      }
+      const data = await res.json();
+      const short = (data.commit || data.version || "").toString().trim();
+      appVersion.textContent = short ? `v${short}` : "v?";
+      if (data.builtAt) {
+        appVersion.title = `部署版本\n${short}\n${data.builtAt}`;
+      }
+    } catch {
+      appVersion.textContent = "v?";
     }
   }
 
@@ -522,6 +542,7 @@
   updateButtons();
   renderResults([]);
   setBadge("ok", "載入中");
+  loadAppVersion();
   loadModel();
 })();
 

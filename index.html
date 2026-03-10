@@ -29,7 +29,10 @@
       <aside class="panel" aria-label="狀態與結果">
         <div class="statusRow">
           <h2>狀態</h2>
-          <span id="statusBadge" class="badge" data-tone="ok">載入中</span>
+          <div style="display:flex; gap:8px; align-items:baseline;">
+            <span id="appVersion" class="badge" data-tone="ok" title="部署版本">v?</span>
+            <span id="statusBadge" class="badge" data-tone="ok">載入中</span>
+          </div>
         </div>
         <div id="status" role="status">模型尚未載入</div>
 
