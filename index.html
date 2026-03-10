@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TF.js 物件偵測範例</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, "Microsoft JhengHei", sans-serif;
+      margin: 24px;
+      line-height: 1.5;
+    }
+
+    h1 {
+      margin-bottom: 16px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    button {
+      padding: 8px 16px;
+      cursor: pointer;
+    }
+
+    .stage {
+      position: relative;
+      display: inline-block;
+      max-width: 100%;
+      border: 1px solid #ccc;
+      overflow: auto;
+    }
+
+    #image,
+    #video {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    #video {
+      display: none;
+    }
+
+    #overlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+      pointer-events: none;
+    }
+
+    #status {
+      margin-top: 12px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>TF.js 物件偵測（圖片 / 相機）</h1>
+
+  <div class="controls">
+    <input type="file" id="fileInput" accept="image/*" />
+    <button id="detectButton" disabled>執行物件偵測</button>
+    <button id="cameraButton">開啟相機</button>
+    <button id="liveDetectButton" disabled>開始即時偵測</button>
+    <button id="captureButton" disabled>拍照偵測</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <img id="image" alt="預覽圖片" />
+    <video id="video" autoplay playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <div id="status">模型尚未載入</div>
+
+  <!-- TF.js (for YOLO SavedModel -> TF.js GraphModel) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const fileInput = document.getElementById("fileInput");
+      const detectButton = document.getElementById("detectButton");
+      const cameraButton = document.getElementById("cameraButton");
+      const liveDetectButton = document.getElementById("liveDetectButton");
+      const captureButton = document.getElementById("captureButton");
+      const image = document.getElementById("image");
+      const video = document.getElementById("video");
+      const overlay = document.getElementById("overlay");
+      const stage = document.getElementById("stage");
+      const status = document.getElementById("status");
+      const ctx = overlay.getContext("2d");
+
+      let model = null;
+      let currentImageUrl = null;
+      let stream = null;
+      let isLiveDetecting = false;
+      let isProcessingFrame = false;
+
+      function setStatus(message) {
+        status.textContent = message;
+      }
+
+      function clearCanvas() {
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+      }
+
+      function syncCanvasSizeFor(element) {
+        const width =
+          element.videoWidth ||
+          element.naturalWidth ||
+          element.width ||
+          element.clientWidth;
+        const height =
+          element.videoHeight ||
+          element.naturalHeight ||
+          element.height ||
+          element.clientHeight;
+
+        if (!width || !height) {
+          return;
+        }
+
+        overlay.width = width;
+        overlay.height = height;
+        overlay.style.width = `${width}px`;
+        overlay.style.height = `${height}px`;
+
+        element.style.width = `${width}px`;
+        element.style.height = `${height}px`;
+
+        stage.style.width = `${width}px`;
+      }
+
+      function drawPredictions(predictions) {
+        clearCanvas();
+
+        ctx.lineWidth = 2;
+        ctx.font = "16px Arial";
+
+        for (const prediction of predictions) {
+          const [x, y, width, height] = prediction.bbox;
+          const score = (prediction.score * 100).toFixed(1);
+          const label = `${prediction.class} ${score}%`;
+
+          ctx.strokeStyle = "#00FFFF";
+          ctx.strokeRect(x, y, width, height);
+
+          const textWidth = ctx.measureText(label).width;
+          const textHeight = 20;
+          const textX = x;
+          const textY = y > textHeight ? y - 4 : y + textHeight;
+
+          ctx.fillStyle = "#00FFFF";
+          ctx.fillRect(textX, textY - textHeight, textWidth + 10, textHeight);
+
+          ctx.fillStyle = "#000000";
+          ctx.fillText(label, textX + 5, textY - 5);
+        }
+      }
+
+      // 假設：你已使用 tensorflowjs_converter
+      // 將 TensorFlow SavedModel 轉成 TF.js GraphModel，
+      // 並輸出到 ../yolo26n_web_model/model.json
+      // 例如：
+      // tensorflowjs_converter --input_format=tf_saved_model ^
+      //   --output_format=tfjs_graph_model ^
+      //   --signature_name=serving_default ^
+      //   --saved_model_tags=serve ^
+      //   ./yolo26n_saved_model ^
+      //   ./yolo26n_saved_model/web_model
+
+      async function loadModel() {
+        try {
+          setStatus("正在載入 YOLO 模型...");
+          detectButton.disabled = true;
+
+          // 注意：index.html 在 tf-webcam 資料夾裡，
+          // 而 tfjs GraphModel 在同層的 yolo26n_web_model 資料夾
+          model = await tf.loadGraphModel("../yolo26n_web_model/model.json");
+
+          setStatus("YOLO 模型載入完成，請選擇圖片");
+          detectButton.disabled = !image.src;
+        } catch (error) {
+          console.error(error);
+          setStatus(`模型載入失敗：${error.message}`);
+        }
+      }
+
+      async function runYolo(imageElement) {
+        if (!model) {
+          throw new Error("模型尚未載入");
+        }
+
+        // 依 Console 輸出推斷：
+        // raw[0]: 一維 scores（長度約 300）
+        // raw[1]: 一維陣列，長度約 1800 = 300 * 6
+        //         每 6 個數字為一個偵測：
+        //         [x1, y1, x2, y2, score, classId]
+        // 座標是以 inputSize 像素為單位。
+
+        const inputSize = 640; // 匯出 YOLO 時的輸入尺寸
+        const scoreThreshold = 0.3;
+
+        return tf.tidy(() => {
+          let img = tf.browser.fromPixels(imageElement).toFloat();
+          const [h, w] = img.shape.slice(0, 2);
+
+          // 直接縮放到 inputSize x inputSize（不額外 padding）
+          img = tf.image.resizeBilinear(img, [inputSize, inputSize]);
+          img = img.expandDims(0).div(255.0);
+
+          const raw = model.execute(img);
+
+          if (!Array.isArray(raw) || raw.length < 2) {
+            console.warn("Unexpected YOLO output format:", raw);
+            throw new Error("YOLO 模型輸出格式與預期不同（需要 2 個 tensor）。");
+          }
+
+          const scoresArr = raw[0].dataSync();
+          const detArr = raw[1].dataSync();
+
+          const numDet = scoresArr.length;
+          const imgWidth = imageElement.naturalWidth || imageElement.width;
+          const imgHeight = imageElement.naturalHeight || imageElement.height;
+          const scaleX = imgWidth / inputSize;
+          const scaleY = imgHeight / inputSize;
+
+          const predictions = [];
+
+          for (let i = 0; i < numDet; i++) {
+            const base = i * 6;
+            if (base + 5 >= detArr.length) break;
+
+            const x1 = detArr[base + 0];
+            const y1 = detArr[base + 1];
+            const x2 = detArr[base + 2];
+            const y2 = detArr[base + 3];
+            const scoreFromDet = detArr[base + 4];
+            const clsId = detArr[base + 5];
+
+            // 分數有兩個來源（raw[0] / raw[1]），取兩者中較大者
+            const score = Math.max(scoresArr[i] ?? 0, scoreFromDet ?? 0);
+            if (score < scoreThreshold) continue;
+
+            const x = x1 * scaleX;
+            const y = y1 * scaleY;
+            const wBox = (x2 - x1) * scaleX;
+            const hBox = (y2 - y1) * scaleY;
+
+            predictions.push({
+              bbox: [x, y, wBox, hBox],
+              class: String(clsId),
+              score,
+            });
+          }
+
+          return predictions;
+        });
+      }
+
+      async function detectObjects() {
+        if (!model) {
+          setStatus("模型尚未載入完成");
+          return;
+        }
+
+        if (!image.src) {
+          setStatus("請先選擇一張圖片");
+          return;
+        }
+
+        try {
+          detectButton.disabled = true;
+          setStatus("正在進行物件偵測 (YOLO)...");
+
+          syncCanvasSizeFor(image);
+          const predictions = await runYolo(image);
+          drawPredictions(predictions);
+
+          if (predictions.length === 0) {
+            setStatus("偵測完成，未找到可辨識物件");
+          } else {
+            const summary = predictions
+              .map((item, index) => {
+                const score = (item.score * 100).toFixed(1);
+                return `${index + 1}. 類別 ${item.class} (${score}%)`;
+              })
+              .join("\n");
+
+            setStatus(`偵測完成，共找到 ${predictions.length} 個物件：\n${summary}`);
+          }
+        } catch (error) {
+          console.error(error);
+          setStatus(`偵測失敗：${error.message}`);
+        } finally {
+          detectButton.disabled = false;
+        }
+      }
+
+      async function startCamera() {
+        try {
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            setStatus("此瀏覽器不支援相機存取");
+            return;
+          }
+
+          if (stream) {
+            return;
+          }
+
+          setStatus("正在開啟相機...");
+
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false,
+          });
+
+          video.srcObject = stream;
+          await video.play();
+
+          image.style.display = "none";
+          video.style.display = "block";
+
+          syncCanvasSizeFor(video);
+          clearCanvas();
+
+          liveDetectButton.disabled = false;
+          captureButton.disabled = false;
+          cameraButton.textContent = "關閉相機";
+
+          setStatus("相機已開啟，可按「即時偵測」或「拍照偵測」");
+        } catch (error) {
+          console.error(error);
+          setStatus(`開啟相機失敗：${error.message}`);
+        }
+      }
+
+      function stopCamera() {
+        if (stream) {
+          for (const track of stream.getTracks()) {
+            track.stop();
+          }
+          stream = null;
+        }
+
+        isLiveDetecting = false;
+        isProcessingFrame = false;
+        liveDetectButton.textContent = "開始即時偵測";
+        liveDetectButton.disabled = true;
+        captureButton.disabled = true;
+
+        video.srcObject = null;
+        video.style.display = "none";
+        image.style.display = "block";
+
+        clearCanvas();
+        setStatus("相機已關閉");
+        cameraButton.textContent = "開啟相機";
+      }
+
+      async function captureFromCameraOnce() {
+        if (!stream || !video.videoWidth) {
+          setStatus("請先開啟相機");
+          return;
+        }
+        if (!model) {
+          setStatus("模型尚未載入完成");
+          return;
+        }
+
+        try {
+          captureButton.disabled = true;
+          setStatus("正在偵測目前畫面 (YOLO)...");
+
+          syncCanvasSizeFor(video);
+          const predictions = await runYolo(video);
+          drawPredictions(predictions);
+
+          if (predictions.length === 0) {
+            setStatus("偵測完成，未找到可辨識物件");
+          } else {
+            const summary = predictions
+              .map((item, index) => {
+                const score = (item.score * 100).toFixed(1);
+                return `${index + 1}. 類別 ${item.class} (${score}%)`;
+              })
+              .join("\n");
+
+            setStatus(`偵測完成（相機畫面），共找到 ${predictions.length} 個物件：\n${summary}`);
+          }
+        } catch (error) {
+          console.error(error);
+          setStatus(`偵測失敗：${error.message}`);
+        } finally {
+          captureButton.disabled = false;
+        }
+      }
+
+      async function liveDetectLoop() {
+        if (!isLiveDetecting || !stream) {
+          return;
+        }
+
+        if (!video.videoWidth || isProcessingFrame) {
+          requestAnimationFrame(liveDetectLoop);
+          return;
+        }
+
+        isProcessingFrame = true;
+
+        try {
+          syncCanvasSizeFor(video);
+          const predictions = await runYolo(video);
+          drawPredictions(predictions);
+        } catch (error) {
+          console.error(error);
+          setStatus(`即時偵測錯誤：${error.message}`);
+          isLiveDetecting = false;
+          liveDetectButton.textContent = "開始即時偵測";
+        } finally {
+          isProcessingFrame = false;
+          if (isLiveDetecting) {
+            requestAnimationFrame(liveDetectLoop);
+          }
+        }
+      }
+
+      fileInput.addEventListener("change", (event) => {
+        const file = event.target.files?.[0];
+        if (!file) {
+          return;
+        }
+
+        if (currentImageUrl) {
+          URL.revokeObjectURL(currentImageUrl);
+          currentImageUrl = null;
+        }
+
+        currentImageUrl = URL.createObjectURL(file);
+        image.src = currentImageUrl;
+        clearCanvas();
+        setStatus("圖片已載入，請點擊「執行物件偵測」");
+      });
+
+      image.addEventListener("load", () => {
+        syncCanvasSizeFor(image);
+        clearCanvas();
+        detectButton.disabled = !model;
+      });
+
+      detectButton.addEventListener("click", () => {
+        detectObjects();
+      });
+
+      cameraButton.addEventListener("click", () => {
+        if (stream) {
+          stopCamera();
+        } else {
+          startCamera();
+        }
+      });
+
+      liveDetectButton.addEventListener("click", () => {
+        if (!stream) {
+          setStatus("請先開啟相機");
+          return;
+        }
+        if (!model) {
+          setStatus("模型尚未載入完成");
+          return;
+        }
+
+        isLiveDetecting = !isLiveDetecting;
+
+        if (isLiveDetecting) {
+          liveDetectButton.textContent = "停止即時偵測";
+          setStatus("即時偵測中...");
+          liveDetectLoop();
+        } else {
+          liveDetectButton.textContent = "開始即時偵測";
+          setStatus("已停止即時偵測");
+        }
+      });
+
+      captureButton.addEventListener("click", () => {
+        captureFromCameraOnce();
+      });
+
+      loadModel();
+    })();
+  </script>
+</body>
+</html>
