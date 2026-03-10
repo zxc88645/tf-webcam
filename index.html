@@ -172,7 +172,7 @@
 
       // 假設：你已使用 tensorflowjs_converter
       // 將 TensorFlow SavedModel 轉成 TF.js GraphModel，
-      // 並輸出到 ../yolo26n_web_model/model.json
+      // 並輸出到 yolo26n_web_model/model.json
       // 例如：
       // tensorflowjs_converter --input_format=tf_saved_model ^
       //   --output_format=tfjs_graph_model ^
@@ -186,9 +186,8 @@
           setStatus("正在載入 YOLO 模型...");
           detectButton.disabled = true;
 
-          // 注意：index.html 在 tf-webcam 資料夾裡，
-          // 而 tfjs GraphModel 在同層的 yolo26n_web_model 資料夾
-          model = await tf.loadGraphModel("../yolo26n_web_model/model.json");
+          // GitHub Pages / 本機：模型與 index.html 同層的 yolo26n_web_model
+          model = await tf.loadGraphModel("yolo26n_web_model/model.json");
 
           setStatus("YOLO 模型載入完成，請選擇圖片");
           detectButton.disabled = !image.src;
