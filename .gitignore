@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Python / TensorFlow converter
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.eggs/
+
+# IDE / Editor
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Optional: 原始 SavedModel / TFLite（體積大，若不想納入版控可取消註解）
+yolo26n_saved_model/
+
+# Logs / build
+*.log
+dist/
+build/
