@@ -27,6 +27,54 @@
   let canvasCssWidth = 0;
   let canvasCssHeight = 0;
   let canvasDpr = 1;
+  let classNames = null;
+
+  function parseMetadataYamlNames(yamlText) {
+    const lines = String(yamlText || "").split(/\r?\n/);
+    const names = [];
+    let inNames = false;
+    let baseIndent = null;
+
+    for (const line of lines) {
+      if (!inNames) {
+        if (/^\s*names\s*:\s*$/.test(line)) {
+          inNames = true;
+        }
+        continue;
+      }
+
+      if (baseIndent == null) {
+        const mIndent = line.match(/^(\s+)\S/);
+        if (!mIndent) continue;
+        baseIndent = mIndent[1].length;
+      }
+
+      const currentIndent = (line.match(/^(\s*)/)?.[1]?.length) ?? 0;
+      if (currentIndent < baseIndent || /^\s*\w+\s*:/.test(line) && currentIndent === 0) {
+        break;
+      }
+
+      const m = line.match(/^\s*(\d+)\s*:\s*(.+?)\s*$/);
+      if (!m) continue;
+      const idx = Number(m[1]);
+      const name = m[2];
+      names[idx] = name;
+    }
+
+    return names.length ? names : null;
+  }
+
+  async function loadClassNames() {
+    try {
+      const metadataUrl = MODEL_URL.replace(/model\.json(\?.*)?$/i, "metadata.yaml$1");
+      const res = await fetch(metadataUrl, { cache: "no-cache" });
+      if (!res.ok) return null;
+      const text = await res.text();
+      return parseMetadataYamlNames(text);
+    } catch {
+      return null;
+    }
+  }
 
   function setBadge(tone, text) {
     if (!statusBadge) return;
@@ -178,6 +226,7 @@
       updateButtons();
 
       model = await tf.loadGraphModel(MODEL_URL);
+      classNames = await loadClassNames();
 
       setStatus("YOLO 模型載入完成，請選擇圖片", "ok");
       updateButtons();
@@ -229,6 +278,10 @@
         const y2 = detArr[base + 3];
         const scoreFromDet = detArr[base + 4];
         const clsId = detArr[base + 5];
+        const clsIndex = Number.isFinite(clsId) ? Math.round(clsId) : Number(clsId);
+        const classLabel =
+          (classNames && Number.isInteger(clsIndex) && classNames[clsIndex]) ||
+          String(clsIndex);
 
         const score = Math.max(scoresArr[i] ?? 0, scoreFromDet ?? 0);
         if (score < SCORE_THRESHOLD) continue;
@@ -240,7 +293,8 @@
 
         predictions.push({
           bbox: [x, y, wBox, hBox],
-          class: String(clsId),
+          class: classLabel,
+          classId: String(clsIndex),
           score,
         });
       }
