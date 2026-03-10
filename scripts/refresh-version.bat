@@ -22,7 +22,7 @@ if not defined BUILT_AT (
   exit /b 1
 )
 
-set "OUTFILE=%~dp0version.json"
+set "OUTFILE=%~dp0..\public\version.json"
 set "TMPFILE=%OUTFILE%.tmp"
 
 (

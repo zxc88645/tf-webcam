@@ -15,7 +15,7 @@
 2. **啟用 GitHub Pages**
    - 進入 repo 的 **Settings** → **Pages**
    - **Source** 選擇 **Deploy from a branch**
-   - **Branch** 選 `main`，**Folder** 選 **/ (root)**
+   - **Branch** 選 `main`，**Folder** 選 **/public**
    - 按 **Save**
 
 3. **等待部署**
@@ -24,17 +24,24 @@
 
 ## 本機執行
 
-用任意靜態伺服器開啟專案根目錄即可，例如：
+用任意靜態伺服器開啟 `public/` 即可，例如：
 
 ```bash
-npx serve .
+npx serve public
 # 或
-python -m http.server 8000
+cd public && python -m http.server 8000
 ```
 
 然後在瀏覽器開啟 `http://localhost:3000`（或 8000）。
 
 ## 專案結構
 
-- `index.html` — 主頁面與 TF.js 推理邏輯
-- `yolo26n_web_model/` — TensorFlow.js 轉換後的 YOLO 模型（model.json + shards）
+- `public/` — 可直接部署的靜態網站（GitHub Pages 指向此資料夾）
+  - `index.html` — 主頁面
+  - `app.js` — TF.js 推理與相機/圖片流程
+  - `styles.css` — UI 樣式
+  - `version.json` — 部署版本資訊（由腳本更新）
+  - `models/` — TensorFlow.js GraphModel（`model.json` + shards）
+    - `yolo26n-pose/`
+    - `yolo26n-detect/`
+- `scripts/` — 開發/部署輔助腳本

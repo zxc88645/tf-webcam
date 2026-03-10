@@ -30,13 +30,13 @@
     pose: {
       id: "pose",
       label: "YOLOv26n Pose",
-      url: "yolo26n-pose_web_model/model.json",
+      url: "./models/yolo26n-pose/model.json",
       inputSize: 640,
     },
     detect: {
       id: "detect",
       label: "YOLOv26n Detect",
-      url: "yolo26n_web_model/model.json",
+      url: "./models/yolo26n-detect/model.json",
       inputSize: 640,
     },
   };
