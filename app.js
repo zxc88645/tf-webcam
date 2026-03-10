@@ -1,15 +1,52 @@
 (() => {
   "use strict";
 
-  const MODEL_URL = "yolo26n_web_model/model.json";
-  const INPUT_SIZE = 640; // 匯出 YOLO 時的輸入尺寸
   const SCORE_THRESHOLD = 0.3;
+  const KEYPOINT_THRESHOLD = 0.25;
+
+  // COCO-17 keypoints skeleton (常見 YOLO pose 輸出)
+  const COCO17_EDGES = [
+    [0, 1],
+    [0, 2],
+    [1, 3],
+    [2, 4],
+    [3, 5],
+    [4, 6],
+    [5, 6],
+    [5, 7],
+    [7, 9],
+    [6, 8],
+    [8, 10],
+    [5, 11],
+    [6, 12],
+    [11, 12],
+    [11, 13],
+    [13, 15],
+    [12, 14],
+    [14, 16],
+  ];
+
+  const MODEL_CONFIGS = {
+    pose: {
+      id: "pose",
+      label: "YOLOv26n Pose",
+      url: "yolo26n-pose_web_model/model.json",
+      inputSize: 640,
+    },
+    detect: {
+      id: "detect",
+      label: "YOLOv26n Detect",
+      url: "yolo26n_web_model/model.json",
+      inputSize: 640,
+    },
+  };
 
   const fileInput = document.getElementById("fileInput");
   const detectButton = document.getElementById("detectButton");
   const cameraButton = document.getElementById("cameraButton");
   const liveDetectButton = document.getElementById("liveDetectButton");
   const captureButton = document.getElementById("captureButton");
+  const modelSelect = document.getElementById("modelSelect");
   const image = document.getElementById("image");
   const video = document.getElementById("video");
   const overlay = document.getElementById("overlay");
@@ -29,6 +66,8 @@
   let canvasCssHeight = 0;
   let canvasDpr = 1;
   let classNames = null;
+  let activeModelKey = "pose";
+  let activeModelConfig = MODEL_CONFIGS[activeModelKey];
 
   function showImagePreview() {
     image.style.display = image.src ? "block" : "none";
@@ -79,7 +118,10 @@
 
   async function loadClassNames() {
     try {
-      const metadataUrl = MODEL_URL.replace(/model\.json(\?.*)?$/i, "metadata.yaml$1");
+      const metadataUrl = activeModelConfig.url.replace(
+        /model\.json(\?.*)?$/i,
+        "metadata.yaml$1",
+      );
       const res = await fetch(metadataUrl, { cache: "no-cache" });
       if (!res.ok) return null;
       const text = await res.text();
@@ -184,6 +226,38 @@
       ctx.strokeStyle = "#00FFFF";
       ctx.strokeRect(dx, dy, dWidth, dHeight);
 
+      if (Array.isArray(prediction.keypoints) && prediction.keypoints.length) {
+        const kpts = prediction.keypoints;
+
+        // skeleton
+        if (kpts.length === 17) {
+          ctx.strokeStyle = "rgba(255, 64, 129, 0.9)";
+          ctx.lineWidth = 2;
+          for (const [a, b] of COCO17_EDGES) {
+            const ka = kpts[a];
+            const kb = kpts[b];
+            if (!ka || !kb) continue;
+            if ((ka.score ?? 0) < KEYPOINT_THRESHOLD || (kb.score ?? 0) < KEYPOINT_THRESHOLD) continue;
+            ctx.beginPath();
+            ctx.moveTo(ka.x * scaleX, ka.y * scaleY);
+            ctx.lineTo(kb.x * scaleX, kb.y * scaleY);
+            ctx.stroke();
+          }
+        }
+
+        // points
+        ctx.fillStyle = "rgba(255, 235, 59, 0.95)";
+        for (const kp of kpts) {
+          if (!kp) continue;
+          if ((kp.score ?? 0) < KEYPOINT_THRESHOLD) continue;
+          const px = kp.x * scaleX;
+          const py = kp.y * scaleY;
+          ctx.beginPath();
+          ctx.arc(px, py, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
       const textWidth = ctx.measureText(label).width;
       const textHeight = 20;
       const textX = dx;
@@ -235,19 +309,128 @@
   async function loadModel() {
     try {
       setBadge("ok", "載入中");
-      status.textContent = "正在載入 YOLO 模型...";
+      status.textContent = `正在載入模型：${activeModelConfig.label}...`;
       updateButtons();
 
-      model = await tf.loadGraphModel(MODEL_URL);
+      if (model?.dispose) {
+        try {
+          model.dispose();
+        } catch {
+          // ignore
+        }
+      }
+      model = null;
+      classNames = null;
+      updateButtons();
+
+      model = await tf.loadGraphModel(activeModelConfig.url);
       classNames = await loadClassNames();
 
-      setStatus("YOLO 模型載入完成，請選擇圖片", "ok");
+      // Debug: 印出模型輸出資訊（pose/detect 可能輸出 tensor 意義不同）
+      try {
+        const dummy = tf.zeros([1, activeModelConfig.inputSize, activeModelConfig.inputSize, 3]);
+        const raw = model.execute(dummy);
+        const isArray = Array.isArray(raw);
+        const isMap = raw && typeof raw === "object" && !raw.dataSync && !isArray;
+        const keys = isMap ? Object.keys(raw) : null;
+        const outputs = normalizeModelOutputs(raw);
+
+        console.groupCollapsed(
+          `[tf-webcam] model loaded: ${activeModelConfig.id} (${activeModelConfig.url})`,
+        );
+        console.log("execute() return type:", isArray ? "Tensor[]" : isMap ? "NamedTensorMap" : "Tensor");
+        if (keys) console.log("output keys:", keys);
+        console.log(
+          "normalized outputs:",
+          outputs.map((t, i) => ({
+            i,
+            name: t?.name,
+            dtype: t?.dtype,
+            shape: t?.shape,
+          })),
+        );
+        const picked = pickScoresAndDetTensors(outputs);
+        console.log("picked tensors:", {
+          scores: { name: picked.scores?.name, dtype: picked.scores?.dtype, shape: picked.scores?.shape },
+          det: { name: picked.det?.name, dtype: picked.det?.dtype, shape: picked.det?.shape },
+        });
+        console.groupEnd();
+
+        if (raw && raw.dispose) {
+          raw.dispose();
+        } else if (Array.isArray(raw)) {
+          for (const t of raw) t?.dispose?.();
+        } else if (isMap && keys) {
+          for (const k of keys) raw[k]?.dispose?.();
+        }
+        dummy.dispose();
+      } catch (e) {
+        console.warn("[tf-webcam] debug execute() failed:", e);
+      }
+
+      setStatus(`模型載入完成（${activeModelConfig.label}），請選擇圖片`, "ok");
       updateButtons();
     } catch (error) {
       console.error(error);
       setStatus(`模型載入失敗：${error.message}`, "warn");
       updateButtons();
     }
+  }
+
+  function normalizeModelOutputs(raw) {
+    // GraphModel.execute() 可能回傳：
+    // - Tensor[]
+    // - NamedTensorMap（key順序不保證）
+    // - Tensor
+    if (Array.isArray(raw)) return raw;
+
+    if (raw && typeof raw === "object" && !raw.dataSync) {
+      const map = raw;
+      const keys = Object.keys(map);
+
+      // 這兩個模型的 signature.outputs 會包含：
+      // - Identity:0
+      // - .../TopKV2:0
+      const topkKey = keys.find((k) => /TopKV2:0$/i.test(k));
+      const identityKey = keys.find((k) => /^Identity:0$/i.test(k) || /\/Identity:0$/i.test(k));
+
+      if (topkKey && identityKey) {
+        return [map[topkKey], map[identityKey]];
+      }
+
+      const values = Object.values(map);
+      if (values.length) return values;
+    }
+
+    if (raw) return [raw];
+    return [];
+  }
+
+  function pickScoresAndDetTensors(outputs) {
+    // 目標：在不同模型/不同輸出順序下，穩定挑出
+    // - scores tensor（通常 rank=2: [1, N]）
+    // - det tensor（通常 rank=3: [1, N, K]，且 K>=6）
+    if (!Array.isArray(outputs) || outputs.length < 2) return { scores: outputs?.[0], det: outputs?.[1] };
+
+    const a = outputs[0];
+    const b = outputs[1];
+    const aRank = Array.isArray(a?.shape) ? a.shape.length : null;
+    const bRank = Array.isArray(b?.shape) ? b.shape.length : null;
+
+    const aLast = aRank ? a.shape[aRank - 1] : null;
+    const bLast = bRank ? b.shape[bRank - 1] : null;
+
+    const aLooksLikeDet = (aRank === 3 && (aLast == null || aLast >= 6)) || (aRank === 2 && aLast >= 6);
+    const bLooksLikeDet = (bRank === 3 && (bLast == null || bLast >= 6)) || (bRank === 2 && bLast >= 6);
+
+    if (aLooksLikeDet && !bLooksLikeDet) return { scores: b, det: a };
+    if (bLooksLikeDet && !aLooksLikeDet) return { scores: a, det: b };
+
+    // 後備：rank 大的多半是 det
+    if ((aRank ?? 0) > (bRank ?? 0)) return { scores: b, det: a };
+    if ((bRank ?? 0) > (aRank ?? 0)) return { scores: a, det: b };
+
+    return { scores: a, det: b };
   }
 
   async function loadAppVersion() {
@@ -277,31 +460,54 @@
     return tf.tidy(() => {
       let img = tf.browser.fromPixels(imageElement).toFloat();
 
-      img = tf.image.resizeBilinear(img, [INPUT_SIZE, INPUT_SIZE]);
+      img = tf.image.resizeBilinear(img, [activeModelConfig.inputSize, activeModelConfig.inputSize]);
       img = img.expandDims(0).div(255.0);
 
       const raw = model.execute(img);
+      const outputs = normalizeModelOutputs(raw);
+      const { scores: scoresTensor, det: detTensor } = pickScoresAndDetTensors(outputs);
 
-      if (!Array.isArray(raw) || raw.length < 2) {
+      if (!scoresTensor || !detTensor) {
         console.warn("Unexpected YOLO output format:", raw);
-        throw new Error("YOLO 模型輸出格式與預期不同（需要 2 個 tensor）。");
+        throw new Error("YOLO 模型輸出格式與預期不同（需要至少 2 個 tensor）。");
       }
 
-      const scoresArr = raw[0].dataSync();
-      const detArr = raw[1].dataSync();
+      const scoresArr = scoresTensor.dataSync();
+      const detArr = detTensor.dataSync();
 
       const numDet = scoresArr.length;
       const imgWidth =
         imageElement.videoWidth || imageElement.naturalWidth || imageElement.width;
       const imgHeight =
         imageElement.videoHeight || imageElement.naturalHeight || imageElement.height;
-      const scaleX = imgWidth / INPUT_SIZE;
-      const scaleY = imgHeight / INPUT_SIZE;
+      const scaleX = imgWidth / activeModelConfig.inputSize;
+      const scaleY = imgHeight / activeModelConfig.inputSize;
 
       const predictions = [];
+      const stride = Math.max(6, Math.floor(detArr.length / Math.max(1, numDet)));
+      const canParseKeypoints = stride > 6 && (stride - 6) % 3 === 0;
+      const numKeypoints = canParseKeypoints ? (stride - 6) / 3 : 0;
+      if (typeof window !== "undefined") {
+        // Debug: 用 collapsed group 避免刷屏
+        console.groupCollapsed?.(`[tf-webcam] runYolo debug (${activeModelConfig.id})`);
+        console.log("scoresTensor:", {
+          name: scoresTensor?.name,
+          dtype: scoresTensor?.dtype,
+          shape: scoresTensor?.shape,
+          sample: Array.from(scoresArr.slice(0, Math.min(5, scoresArr.length))),
+        });
+        console.log("detTensor:", {
+          name: detTensor?.name,
+          dtype: detTensor?.dtype,
+          shape: detTensor?.shape,
+          sample: Array.from(detArr.slice(0, Math.min(12, detArr.length))),
+        });
+        console.log("numDet:", numDet, "detArr.length:", detArr.length, "stride:", stride, "numKeypoints:", numKeypoints);
+        console.groupEnd?.();
+      }
 
       for (let i = 0; i < numDet; i++) {
-        const base = i * 6;
+        const base = i * stride;
         if (base + 5 >= detArr.length) break;
 
         const x1 = detArr[base + 0];
@@ -323,12 +529,27 @@
         const wBox = (x2 - x1) * scaleX;
         const hBox = (y2 - y1) * scaleY;
 
-        predictions.push({
+        const prediction = {
           bbox: [x, y, wBox, hBox],
           class: classLabel,
           classId: String(clsIndex),
           score,
-        });
+        };
+
+        if (numKeypoints) {
+          const keypoints = [];
+          for (let k = 0; k < numKeypoints; k++) {
+            const off = base + 6 + k * 3;
+            if (off + 2 >= detArr.length) break;
+            const kx = detArr[off + 0] * scaleX;
+            const ky = detArr[off + 1] * scaleY;
+            const ks = detArr[off + 2];
+            keypoints.push({ x: kx, y: ky, score: ks });
+          }
+          prediction.keypoints = keypoints;
+        }
+
+        predictions.push(prediction);
       }
 
       return predictions;
@@ -349,7 +570,9 @@
     try {
       updateButtons();
       setBadge("ok", "偵測中");
-      status.textContent = `正在進行物件偵測 (YOLO)${modeLabel ? `：${modeLabel}` : ""}...`;
+      status.textContent = `正在進行物件偵測（${activeModelConfig.label}）${
+        modeLabel ? `：${modeLabel}` : ""
+      }...`;
 
       syncCanvasSizeFor(sourceElement);
       const { scaleX, scaleY } = getDrawScaleFor(sourceElement);
@@ -576,12 +799,49 @@
     captureFromCameraOnce();
   });
 
+  async function switchModel(nextKey) {
+    const nextConfig = MODEL_CONFIGS[nextKey];
+    if (!nextConfig) return;
+    if (activeModelKey === nextKey && model) return;
+
+    // 切換模型前先停止即時偵測，避免同時推論
+    isLiveDetecting = false;
+    isProcessingFrame = false;
+    if (liveDetectButton) liveDetectButton.textContent = "開始即時偵測";
+
+    activeModelKey = nextKey;
+    activeModelConfig = nextConfig;
+
+    clearCanvas();
+    renderResults([]);
+    setBadge("ok", "載入中");
+    setStatus(`切換模型中：${activeModelConfig.label}...`, "ok");
+    updateButtons();
+
+    await loadModel();
+  }
+
+  if (modelSelect) {
+    modelSelect.value = activeModelKey;
+    modelSelect.addEventListener("change", () => {
+      const nextKey = modelSelect.value;
+      switchModel(nextKey);
+    });
+  }
+
   window.addEventListener("beforeunload", () => {
     if (currentImageUrl) {
       URL.revokeObjectURL(currentImageUrl);
       currentImageUrl = null;
     }
     stopCamera();
+    if (model?.dispose) {
+      try {
+        model.dispose();
+      } catch {
+        // ignore
+      }
+    }
   });
 
   // 初始化時先隱藏預覽，避免載入瞬間出現「死圖/破圖」
@@ -597,6 +857,10 @@
   renderResults([]);
   setBadge("ok", "載入中");
   loadAppVersion();
+  // 預設使用 pose
+  if (modelSelect) {
+    modelSelect.value = activeModelKey;
+  }
   loadModel();
 })();
 

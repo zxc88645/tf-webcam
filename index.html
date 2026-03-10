@@ -12,6 +12,13 @@
     <p class="subtle">上傳圖片或開啟相機，使用 YOLO 模型進行物件偵測。</p>
 
     <div class="controls" aria-label="操作區">
+      <label for="modelSelect" class="muted" style="display:flex; align-items:center; gap:8px;">
+        模型
+        <select id="modelSelect" aria-label="選擇模型">
+          <option value="pose" selected>YOLOv26n Pose</option>
+          <option value="detect">YOLOv26n Detect</option>
+        </select>
+      </label>
       <input type="file" id="fileInput" accept="image/*" />
       <button id="detectButton" disabled>執行物件偵測</button>
       <button id="cameraButton">開啟相機</button>
