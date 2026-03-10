@@ -102,6 +102,8 @@ button:disabled {
   display: block;
   max-width: 100%;
   height: auto;
+  position: relative;
+  z-index: 1;
 }
 
 #video {
@@ -113,6 +115,8 @@ button:disabled {
   left: 0;
   top: 0;
   pointer-events: none;
+  z-index: 2;
+  display: block;
 }
 
 .panel {

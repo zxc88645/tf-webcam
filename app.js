@@ -24,6 +24,9 @@
   let stream = null;
   let isLiveDetecting = false;
   let isProcessingFrame = false;
+  let canvasCssWidth = 0;
+  let canvasCssHeight = 0;
+  let canvasDpr = 1;
 
   function setBadge(tone, text) {
     if (!statusBadge) return;
@@ -43,54 +46,87 @@
   }
 
   function clearCanvas() {
+    // Clear in backing-store pixels
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, overlay.width, overlay.height);
   }
 
   function syncCanvasSizeFor(element) {
-    const width =
+    const intrinsicWidth =
       element.videoWidth ||
       element.naturalWidth ||
       element.width ||
       element.clientWidth;
-    const height =
+    const intrinsicHeight =
       element.videoHeight ||
       element.naturalHeight ||
       element.height ||
       element.clientHeight;
 
-    if (!width || !height) {
+    if (!intrinsicWidth || !intrinsicHeight) {
       return;
     }
 
-    overlay.width = width;
-    overlay.height = height;
-    overlay.style.width = `${width}px`;
-    overlay.style.height = `${height}px`;
+    const rect = element.getBoundingClientRect?.();
+    const displayWidth = rect?.width ? Math.max(1, rect.width) : intrinsicWidth;
+    const displayHeight = rect?.height ? Math.max(1, rect.height) : intrinsicHeight;
 
-    element.style.width = `${width}px`;
-    element.style.height = `${height}px`;
+    canvasCssWidth = displayWidth;
+    canvasCssHeight = displayHeight;
+    canvasDpr = window.devicePixelRatio || 1;
 
-    stage.style.width = `${width}px`;
+    overlay.width = Math.round(displayWidth * canvasDpr);
+    overlay.height = Math.round(displayHeight * canvasDpr);
+    overlay.style.width = `${displayWidth}px`;
+    overlay.style.height = `${displayHeight}px`;
   }
 
-  function drawPredictions(predictions) {
+  function getDrawScaleFor(element) {
+    const intrinsicWidth =
+      element.videoWidth ||
+      element.naturalWidth ||
+      element.width ||
+      element.clientWidth;
+    const intrinsicHeight =
+      element.videoHeight ||
+      element.naturalHeight ||
+      element.height ||
+      element.clientHeight;
+
+    if (!intrinsicWidth || !intrinsicHeight || !canvasCssWidth || !canvasCssHeight) {
+      return { scaleX: 1, scaleY: 1 };
+    }
+
+    return {
+      scaleX: canvasCssWidth / intrinsicWidth,
+      scaleY: canvasCssHeight / intrinsicHeight,
+    };
+  }
+
+  function drawPredictions(predictions, scaleX = 1, scaleY = 1) {
     clearCanvas();
 
+    // Draw in CSS pixels; backing store is scaled by DPR.
+    ctx.setTransform(canvasDpr, 0, 0, canvasDpr, 0, 0);
     ctx.lineWidth = 2;
     ctx.font = "16px Arial";
 
     for (const prediction of predictions) {
       const [x, y, width, height] = prediction.bbox;
+      const dx = x * scaleX;
+      const dy = y * scaleY;
+      const dWidth = width * scaleX;
+      const dHeight = height * scaleY;
       const score = (prediction.score * 100).toFixed(1);
       const label = `${prediction.class} ${score}%`;
 
       ctx.strokeStyle = "#00FFFF";
-      ctx.strokeRect(x, y, width, height);
+      ctx.strokeRect(dx, dy, dWidth, dHeight);
 
       const textWidth = ctx.measureText(label).width;
       const textHeight = 20;
-      const textX = x;
-      const textY = y > textHeight ? y - 4 : y + textHeight;
+      const textX = dx;
+      const textY = dy > textHeight ? dy - 4 : dy + textHeight;
 
       ctx.fillStyle = "#00FFFF";
       ctx.fillRect(textX, textY - textHeight, textWidth + 10, textHeight);
@@ -174,8 +210,10 @@
       const detArr = raw[1].dataSync();
 
       const numDet = scoresArr.length;
-      const imgWidth = imageElement.naturalWidth || imageElement.width;
-      const imgHeight = imageElement.naturalHeight || imageElement.height;
+      const imgWidth =
+        imageElement.videoWidth || imageElement.naturalWidth || imageElement.width;
+      const imgHeight =
+        imageElement.videoHeight || imageElement.naturalHeight || imageElement.height;
       const scaleX = imgWidth / INPUT_SIZE;
       const scaleY = imgHeight / INPUT_SIZE;
 
@@ -228,8 +266,9 @@
       status.textContent = `正在進行物件偵測 (YOLO)${modeLabel ? `：${modeLabel}` : ""}...`;
 
       syncCanvasSizeFor(sourceElement);
+      const { scaleX, scaleY } = getDrawScaleFor(sourceElement);
       const predictions = await runYolo(sourceElement);
-      drawPredictions(predictions);
+      drawPredictions(predictions, scaleX, scaleY);
       renderResults(predictions);
 
       setStatus(formatPredictionsSummary(predictions), "ok");
@@ -328,8 +367,9 @@
 
     try {
       syncCanvasSizeFor(video);
+      const { scaleX, scaleY } = getDrawScaleFor(video);
       const predictions = await runYolo(video);
-      drawPredictions(predictions);
+      drawPredictions(predictions, scaleX, scaleY);
       renderResults(predictions);
       setBadge("ok", "即時中");
     } catch (error) {
