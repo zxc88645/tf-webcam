@@ -14,8 +14,7 @@
 
 2. **啟用 GitHub Pages**
    - 進入 repo 的 **Settings** → **Pages**
-   - **Source** 選擇 **Deploy from a branch**
-   - **Branch** 選 `main`，**Folder** 選 **/public**
+   - **Source** 選擇 **GitHub Actions**
    - 按 **Save**
 
 3. **等待部署**
