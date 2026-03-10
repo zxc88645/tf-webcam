@@ -30,6 +30,18 @@
   let canvasDpr = 1;
   let classNames = null;
 
+  function showImagePreview() {
+    image.style.display = image.src ? "block" : "none";
+  }
+
+  function hideImagePreview() {
+    image.style.display = "none";
+  }
+
+  function hideVideoPreview() {
+    video.style.display = "none";
+  }
+
   function parseMetadataYamlNames(yamlText) {
     const lines = String(yamlText || "").split(/\r?\n/);
     const names = [];
@@ -368,6 +380,8 @@
 
       setStatus("正在開啟相機...", "ok");
 
+      hideVideoPreview();
+      hideImagePreview();
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: false,
@@ -376,7 +390,24 @@
       video.srcObject = stream;
       await video.play();
 
-      image.style.display = "none";
+      // 等待第一幀可用，避免剛開啟時顯示「死圖/黑屏」或錯誤尺寸
+      await new Promise((resolve) => {
+        if (video.readyState >= 2 && video.videoWidth) return resolve();
+        const onReady = () => {
+          video.removeEventListener("loadeddata", onReady);
+          resolve();
+        };
+        video.addEventListener("loadeddata", onReady, { once: true });
+        // 備援：若 loadeddata 沒觸發，輪詢直到拿到尺寸
+        const start = performance.now();
+        const tick = () => {
+          if (video.videoWidth) return resolve();
+          if (performance.now() - start > 2000) return resolve();
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+
       video.style.display = "block";
 
       syncCanvasSizeFor(video);
@@ -407,7 +438,7 @@
 
     video.srcObject = null;
     video.style.display = "none";
-    image.style.display = "block";
+    showImagePreview();
 
     clearCanvas();
     cameraButton.textContent = "開啟相機";
@@ -477,17 +508,31 @@
       currentImageUrl = null;
     }
 
-    currentImageUrl = URL.createObjectURL(file);
-    image.src = currentImageUrl;
+    // 先隱藏，避免舊快取影像/破圖在載入新圖前一瞬間顯示
+    hideImagePreview();
+    hideVideoPreview();
     clearCanvas();
     renderResults([]);
-    setStatus("圖片已載入，請點擊「執行物件偵測」", "ok");
+    setStatus("正在載入圖片...", "ok");
+
+    currentImageUrl = URL.createObjectURL(file);
+    image.src = currentImageUrl;
     updateButtons();
   });
 
   image.addEventListener("load", () => {
+    showImagePreview();
     syncCanvasSizeFor(image);
     clearCanvas();
+    setStatus("圖片已載入，請點擊「執行物件偵測」", "ok");
+    updateButtons();
+  });
+
+  image.addEventListener("error", () => {
+    hideImagePreview();
+    clearCanvas();
+    renderResults([]);
+    setStatus("圖片載入失敗，請重新選擇檔案", "warn");
     updateButtons();
   });
 
@@ -539,6 +584,15 @@
     stopCamera();
   });
 
+  // 初始化時先隱藏預覽，避免載入瞬間出現「死圖/破圖」
+  hideImagePreview();
+  hideVideoPreview();
+  try {
+    image.removeAttribute("src");
+  } catch {
+    // ignore
+  }
+  clearCanvas();
   updateButtons();
   renderResults([]);
   setBadge("ok", "載入中");
