@@ -76,6 +76,7 @@ export function App() {
   }, [activeModelConfig.label, model.state]);
 
   const isCameraRunning = camera.state.status === "running";
+  const isCameraUnavailable = camera.capability.status === "unavailable";
   const canDetectImage = model.state.status === "ready" && !isCameraRunning;
   const canStartCamera = model.state.status === "ready" && !isCameraRunning;
   const canLiveDetect = model.state.status === "ready" && isCameraRunning;
@@ -339,14 +340,23 @@ export function App() {
         >
           {isDetecting && viewMode === "image" ? "辨識中…" : "執行物件偵測"}
         </button>
-        <button
-          id="cameraButton"
-          disabled={!canStartCamera || isDetecting}
-          onClick={() => void startCamera()}
-          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+        <span
+          title={
+            isCameraUnavailable
+              ? (camera.capability.message ?? "此裝置無法使用相機")
+              : undefined
+          }
+          className="inline-flex"
         >
-          開啟相機
-        </button>
+          <button
+            id="cameraButton"
+            disabled={!canStartCamera || isDetecting || isCameraUnavailable}
+            onClick={() => void startCamera()}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 disabled:opacity-100"
+          >
+            開啟相機
+          </button>
+        </span>
         <button
           id="liveDetectButton"
           disabled={!canLiveDetect || isDetecting}
