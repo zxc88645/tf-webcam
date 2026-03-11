@@ -28,15 +28,14 @@
 
 ## 本機執行
 
-用任意靜態伺服器開啟 `public/` 即可，例如：
+使用 Vite 開發伺服器（推薦）：
 
 ```bash
-npx serve public
-# 或
-cd public && python -m http.server 8000
+npm install
+npm run dev
 ```
 
-然後在瀏覽器開啟 `http://localhost:3000`（或 8000）。
+然後在瀏覽器開啟終端機顯示的網址（通常是 `http://localhost:5173`）。
 
 ## Commit hook（格式化 + ESLint）
 
@@ -53,12 +52,15 @@ npm install
 
 ## 專案結構
 
-- `public/` — 可直接部署的靜態網站（GitHub Pages 指向此資料夾）
-  - `index.html` — 主頁面
-  - `app.js` — TF.js 推理與相機/圖片流程
-  - `styles.css` — UI 樣式
+- `src/` — 應用程式來源碼（React + TypeScript）
+  - `app/` — UI 入口（`App.tsx`）
+  - `features/` — 功能模組（camera / detection）
+  - `lib/` — 推論與繪製等共用邏輯
+  - `styles/` — 全域樣式（Tailwind）
+- `public/` — 靜態資產（Vite build 時原樣拷貝到 `dist/`）
   - `version.json` — 部署版本資訊（由腳本更新）
   - `models/` — TensorFlow.js GraphModel（`model.json` + shards）
     - `yolo26n-pose/`
     - `yolo26n-detect/`
-- `scripts/` — 開發/部署輔助腳本
+    - `yolo26n-seg/`
+- `scripts/` — 開發/部署輔助腳本（例如產生 `public/version.json`）
