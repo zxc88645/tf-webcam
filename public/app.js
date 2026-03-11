@@ -226,9 +226,14 @@ import {
           }
         }
 
-        const px = Math.round(dx);
-        const py = Math.round(dy);
-        ctx.putImageData(imgData, px, py);
+        // putImageData() 只能整數座標，手機常有非整數縮放 -> 會和 bbox (float) 產生偏移。
+        // 改為：先畫到離屏 canvas，再用 drawImage 以 float 座標貼上。
+        const off = document.createElement("canvas");
+        off.width = outW;
+        off.height = outH;
+        const offCtx = off.getContext("2d");
+        offCtx.putImageData(imgData, 0, 0);
+        ctx.drawImage(off, dx, dy, dWidth, dHeight);
       }
 
       ctx.strokeStyle = "#00FFFF";
