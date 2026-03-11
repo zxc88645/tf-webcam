@@ -22,6 +22,8 @@ export function App() {
   const [predictions, setPredictions] = useState<YoloPrediction[]>([]);
   const [viewMode, setViewMode] = useState<"image" | "video">("image");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [lastDetectMs, setLastDetectMs] = useState<number | null>(null);
 
   const imageRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -79,6 +81,10 @@ export function App() {
   const canLiveDetect = model.state.status === "ready" && isCameraRunning;
   const canCaptureDetect = model.state.status === "ready" && isCameraRunning;
 
+  async function nextPaint() {
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+  }
+
   function clearOverlaySafe() {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -113,25 +119,40 @@ export function App() {
     if (!model.api) return;
     const image = imageRef.current;
     if (!image?.src) return;
-    const { scaleX, scaleY } = overlayForImage.getDrawScale();
-    const preds = runYolo(
-      model.api.model,
-      image,
-      {
-        id: activeModelConfig.id,
-        label: activeModelConfig.label,
-        url: activeModelConfig.url,
-        inputSize: activeModelConfig.inputSize,
-      },
-      model.api.classNames,
-    );
-    setPredictions(preds);
-    if (canvasRef.current) {
-      renderOverlay(canvasRef.current, preds, {
-        dpr: window.devicePixelRatio || 1,
-        scaleX,
-        scaleY,
-      });
+    setIsDetecting(true);
+    setLastDetectMs(null);
+    setTone("ok");
+    setStatusText("辨識中…");
+    await nextPaint();
+    const t0 = performance.now();
+    try {
+      const { scaleX, scaleY } = overlayForImage.getDrawScale();
+      const preds = runYolo(
+        model.api.model,
+        image,
+        {
+          id: activeModelConfig.id,
+          label: activeModelConfig.label,
+          url: activeModelConfig.url,
+          inputSize: activeModelConfig.inputSize,
+        },
+        model.api.classNames,
+      );
+      setPredictions(preds);
+      if (canvasRef.current) {
+        renderOverlay(canvasRef.current, preds, {
+          dpr: window.devicePixelRatio || 1,
+          scaleX,
+          scaleY,
+        });
+      }
+    } finally {
+      setLastDetectMs(performance.now() - t0);
+      setIsDetecting(false);
+      if (model.state.status === "ready") {
+        setTone("ok");
+        setStatusText(`模型就緒：${activeModelConfig.label}`);
+      }
     }
   }
 
@@ -175,6 +196,7 @@ export function App() {
       st.processing = true;
       try {
         const { scaleX, scaleY } = overlayForVideo.getDrawScale();
+        const t0 = performance.now();
         const preds = runYolo(
           model.api!.model,
           video,
@@ -187,6 +209,7 @@ export function App() {
           model.api!.classNames,
         );
         setPredictions(preds);
+        setLastDetectMs(performance.now() - t0);
         if (canvasRef.current) {
           renderOverlay(canvasRef.current, preds, {
             dpr: window.devicePixelRatio || 1,
@@ -209,25 +232,40 @@ export function App() {
     if (!model.api) return;
     const video = videoRef.current;
     if (!video) return;
-    const { scaleX, scaleY } = overlayForVideo.getDrawScale();
-    const preds = runYolo(
-      model.api.model,
-      video,
-      {
-        id: activeModelConfig.id,
-        label: activeModelConfig.label,
-        url: activeModelConfig.url,
-        inputSize: activeModelConfig.inputSize,
-      },
-      model.api.classNames,
-    );
-    setPredictions(preds);
-    if (canvasRef.current) {
-      renderOverlay(canvasRef.current, preds, {
-        dpr: window.devicePixelRatio || 1,
-        scaleX,
-        scaleY,
-      });
+    setIsDetecting(true);
+    setLastDetectMs(null);
+    setTone("ok");
+    setStatusText("辨識中…");
+    await nextPaint();
+    const t0 = performance.now();
+    try {
+      const { scaleX, scaleY } = overlayForVideo.getDrawScale();
+      const preds = runYolo(
+        model.api.model,
+        video,
+        {
+          id: activeModelConfig.id,
+          label: activeModelConfig.label,
+          url: activeModelConfig.url,
+          inputSize: activeModelConfig.inputSize,
+        },
+        model.api.classNames,
+      );
+      setPredictions(preds);
+      if (canvasRef.current) {
+        renderOverlay(canvasRef.current, preds, {
+          dpr: window.devicePixelRatio || 1,
+          scaleX,
+          scaleY,
+        });
+      }
+    } finally {
+      setLastDetectMs(performance.now() - t0);
+      setIsDetecting(false);
+      if (model.state.status === "ready") {
+        setTone("ok");
+        setStatusText(`模型就緒：${activeModelConfig.label}`);
+      }
     }
   }
 
@@ -290,15 +328,20 @@ export function App() {
 
         <button
           id="detectButton"
-          disabled={!canDetectImage || !imageUrl}
+          disabled={
+            !canDetectImage ||
+            !imageUrl ||
+            isDetecting ||
+            liveDetectRef.current.running
+          }
           onClick={() => void detectOnImage()}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          執行物件偵測
+          {isDetecting && viewMode === "image" ? "辨識中…" : "執行物件偵測"}
         </button>
         <button
           id="cameraButton"
-          disabled={!canStartCamera}
+          disabled={!canStartCamera || isDetecting}
           onClick={() => void startCamera()}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -306,7 +349,7 @@ export function App() {
         </button>
         <button
           id="liveDetectButton"
-          disabled={!canLiveDetect}
+          disabled={!canLiveDetect || isDetecting}
           onClick={() =>
             liveDetectRef.current.running ? stopLiveDetect() : startLiveDetect()
           }
@@ -316,11 +359,11 @@ export function App() {
         </button>
         <button
           id="captureButton"
-          disabled={!canCaptureDetect}
+          disabled={!canCaptureDetect || isDetecting}
           onClick={() => void captureAndDetect()}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          拍照偵測
+          {isDetecting && viewMode === "video" ? "辨識中…" : "拍照偵測"}
         </button>
       </div>
 
@@ -337,7 +380,7 @@ export function App() {
             src={imageUrl ?? undefined}
             className={[
               "relative z-10 block max-w-full",
-              viewMode === "image" ? "block" : "hidden",
+              viewMode === "image" && imageUrl ? "block" : "hidden",
             ].join(" ")}
           />
           <video
@@ -355,6 +398,17 @@ export function App() {
             ref={canvasRef}
             className="pointer-events-none absolute left-0 top-0 z-20 block"
           />
+
+          {(model.state.status === "loading" || isDetecting) && (
+            <div className="absolute inset-0 z-30 grid place-items-center bg-white/55 backdrop-blur-[1px]">
+              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-cyan-500" />
+                <div className="text-sm text-slate-800">
+                  {isDetecting ? "辨識中…" : "載入中…"}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <aside
@@ -392,6 +446,19 @@ export function App() {
             className="whitespace-pre-wrap font-sans text-xs text-slate-900"
           >
             {statusText}
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            {liveDetectRef.current.running && (
+              <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
+                即時偵測中
+              </span>
+            )}
+            {lastDetectMs != null && (
+              <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
+                最近一次推論：{Math.round(lastDetectMs)}ms
+              </span>
+            )}
           </div>
 
           <h2 className="mt-3 text-sm font-semibold text-slate-900">結果</h2>

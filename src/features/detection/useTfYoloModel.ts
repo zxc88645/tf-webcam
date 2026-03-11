@@ -33,6 +33,7 @@ export function useTfYoloModel(activeModelConfig: ModelConfig) {
     let cancelled = false;
     (async () => {
       try {
+        setState({ status: "loading", message: "初始化 TensorFlow.js…" });
         await tf.ready();
         if (cancelled) return;
         setTfBackendReady(true);
@@ -51,7 +52,7 @@ export function useTfYoloModel(activeModelConfig: ModelConfig) {
     const seq = ++loadSeq.current;
     setState({
       status: "loading",
-      message: `載入模型：${activeModelConfig.label}`,
+      message: `載入模型：${activeModelConfig.label}（準備中）…`,
     });
 
     let cancelled = false;
@@ -61,13 +62,26 @@ export function useTfYoloModel(activeModelConfig: ModelConfig) {
         modelRef.current = null;
         classNamesRef.current = null;
 
+        setState({
+          status: "loading",
+          message: `載入模型：${activeModelConfig.label}（下載/解析）…`,
+        });
         const model = (await tf.loadGraphModel(activeModelConfig.url, {
           fromTFHub: false,
         })) as GraphModel;
+
+        setState({
+          status: "loading",
+          message: `載入模型：${activeModelConfig.label}（載入標籤）…`,
+        });
         const names = await loadClassNames(toCoreConfig(activeModelConfig));
 
         // warmup (best-effort)
         try {
+          setState({
+            status: "loading",
+            message: `載入模型：${activeModelConfig.label}（warmup）…`,
+          });
           tf.tidy(() => {
             const x = tf.zeros(
               [1, activeModelConfig.inputSize, activeModelConfig.inputSize, 3],

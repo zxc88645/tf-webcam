@@ -1,4 +1,5 @@
 import type { YoloPrediction } from "../yolo/types";
+import { COCO17_EDGES, KEYPOINT_THRESHOLD } from "../yolo/yoloCore";
 
 export type OverlayRenderOptions = {
   dpr?: number;
@@ -56,5 +57,36 @@ export function renderOverlay(
     ctx.fillRect(labelX, labelY, labelW, 18);
     ctx.fillStyle = "white";
     ctx.fillText(label, labelX + paddingX, labelY + 13);
+
+    // pose keypoints + skeleton (if present)
+    if (p.keypoints?.length) {
+      const kps = p.keypoints;
+
+      // skeleton edges
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(34,197,94,0.95)"; // green
+      for (const [a, b] of COCO17_EDGES) {
+        const ka = kps[a];
+        const kb = kps[b];
+        if (!ka || !kb) continue;
+        if (ka.score < KEYPOINT_THRESHOLD || kb.score < KEYPOINT_THRESHOLD)
+          continue;
+        ctx.beginPath();
+        ctx.moveTo(ka.x * scaleX, ka.y * scaleY);
+        ctx.lineTo(kb.x * scaleX, kb.y * scaleY);
+        ctx.stroke();
+      }
+
+      // keypoint dots
+      ctx.fillStyle = "rgba(34,197,94,0.95)";
+      for (const k of kps) {
+        if (k.score < KEYPOINT_THRESHOLD) continue;
+        ctx.beginPath();
+        ctx.arc(k.x * scaleX, k.y * scaleY, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
   }
 }
