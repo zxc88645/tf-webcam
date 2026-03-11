@@ -1,6 +1,22 @@
 # TF.js 物件偵測範例 (tf-webcam)
 
-使用 TensorFlow.js 與 YOLO 模型的靜態網頁範例，支援圖片上傳與物件偵測。
+使用 TensorFlow.js 與 YOLO 26 模型的靜態網頁範例，支援圖片上傳與物件偵測。
+
+本專案採用 **本地端（瀏覽器端）推論**：模型與推論流程會在你的裝置上執行（透過 TensorFlow.js），不會把影像上傳到後端伺服器。
+
+## 隱私 / 離線推論
+
+- **推論位置**：在使用者的瀏覽器中執行（client-side）
+- **資料流向**：相機影像與上傳圖片不會送到任何伺服器
+- **後端 / API**：本專案**沒有**後端服務，**沒有**任何額外 API 介面（純前端靜態頁面）
+
+## YOLO 26 簡介
+
+YOLO 26（又稱 YOLOv26 / Ultralytics YOLO26）於 **2025 年 9 月**釋出，主打在**邊緣裝置**與**低功耗設備**上兼顧效率、準確率與可部署性。依據你提供的參考內容，其重點包含：
+
+- **架構/訓練改動**：移除 Distribution Focal Loss（DFL）、採用端到端 **NMS-free** 推論、加入 ProgLoss 與 Small-Target-Aware Label Assignment（STAL）、引入 MuSGD 以提升收斂穩定性
+- **多任務支援**：物件偵測、實例分割（segmentation）、姿態/關鍵點（pose/keypoints）、旋轉框（oriented detection）、分類（classification）
+- **部署導向**：支援多種匯出/部署路徑（例如 ONNX、TensorRT、CoreML、TFLite），並可搭配 INT8 / FP16 量化以提升即時性
 
 ## 線上範例
 
