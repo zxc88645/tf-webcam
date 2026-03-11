@@ -1,30 +1,14 @@
+import {
+  COCO17_EDGES,
+  KEYPOINT_THRESHOLD,
+  normalizeModelOutputs,
+  pickYoloTensors,
+  loadClassNames,
+  runYolo,
+} from "./yoloCore.js";
+
 (() => {
   "use strict";
-
-  const SCORE_THRESHOLD = 0.3;
-  const KEYPOINT_THRESHOLD = 0.25;
-
-  // COCO-17 keypoints skeleton (常見 YOLO pose 輸出)
-  const COCO17_EDGES = [
-    [0, 1],
-    [0, 2],
-    [1, 3],
-    [2, 4],
-    [3, 5],
-    [4, 6],
-    [5, 6],
-    [5, 7],
-    [7, 9],
-    [6, 8],
-    [8, 10],
-    [5, 11],
-    [6, 12],
-    [11, 12],
-    [11, 13],
-    [13, 15],
-    [12, 14],
-    [14, 16],
-  ];
 
   const MODEL_CONFIGS = {
     pose: {
@@ -37,6 +21,12 @@
       id: "detect",
       label: "YOLOv26n Detect",
       url: "./models/yolo26n-detect/model.json",
+      inputSize: 640,
+    },
+    seg: {
+      id: "seg",
+      label: "YOLOv26n Seg",
+      url: "./models/yolo26n-seg/model.json",
       inputSize: 640,
     },
   };
@@ -79,56 +69,6 @@
 
   function hideVideoPreview() {
     video.style.display = "none";
-  }
-
-  function parseMetadataYamlNames(yamlText) {
-    const lines = String(yamlText || "").split(/\r?\n/);
-    const names = [];
-    let inNames = false;
-    let baseIndent = null;
-
-    for (const line of lines) {
-      if (!inNames) {
-        if (/^\s*names\s*:\s*$/.test(line)) {
-          inNames = true;
-        }
-        continue;
-      }
-
-      if (baseIndent == null) {
-        const mIndent = line.match(/^(\s+)\S/);
-        if (!mIndent) continue;
-        baseIndent = mIndent[1].length;
-      }
-
-      const currentIndent = (line.match(/^(\s*)/)?.[1]?.length) ?? 0;
-      if (currentIndent < baseIndent || /^\s*\w+\s*:/.test(line) && currentIndent === 0) {
-        break;
-      }
-
-      const m = line.match(/^\s*(\d+)\s*:\s*(.+?)\s*$/);
-      if (!m) continue;
-      const idx = Number(m[1]);
-      const name = m[2];
-      names[idx] = name;
-    }
-
-    return names.length ? names : null;
-  }
-
-  async function loadClassNames() {
-    try {
-      const metadataUrl = activeModelConfig.url.replace(
-        /model\.json(\?.*)?$/i,
-        "metadata.yaml$1",
-      );
-      const res = await fetch(metadataUrl, { cache: "no-cache" });
-      if (!res.ok) return null;
-      const text = await res.text();
-      return parseMetadataYamlNames(text);
-    } catch {
-      return null;
-    }
   }
 
   function setBadge(tone, text) {
@@ -206,6 +146,39 @@
     };
   }
 
+  function colorForClassId(classId) {
+    // deterministic-ish color per class (use hue wheel for clear separation)
+    const n = Number.parseInt(classId, 10);
+    const hue = Number.isFinite(n) ? (n * 47) % 360 : 200;
+    return `hsla(${hue}, 95%, 55%, 0.35)`;
+  }
+
+  function hslaToRgba(h, s, l, a) {
+    // h: 0-360, s/l: 0-100, a: 0-1
+    const hh = (((h % 360) + 360) % 360) / 360;
+    const ss = Math.max(0, Math.min(1, s / 100));
+    const ll = Math.max(0, Math.min(1, l / 100));
+
+    const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss;
+    const p = 2 * ll - q;
+
+    const hue2rgb = (t) => {
+      let tt = t;
+      if (tt < 0) tt += 1;
+      if (tt > 1) tt -= 1;
+      if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+      if (tt < 1 / 2) return q;
+      if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+      return p;
+    };
+
+    const r = Math.round(hue2rgb(hh + 1 / 3) * 255);
+    const g = Math.round(hue2rgb(hh) * 255);
+    const b = Math.round(hue2rgb(hh - 1 / 3) * 255);
+    const aa = Math.round(Math.max(0, Math.min(1, a)) * 255);
+    return { r, g, b, a: aa };
+  }
+
   function drawPredictions(predictions, scaleX = 1, scaleY = 1) {
     clearCanvas();
 
@@ -222,6 +195,41 @@
       const dHeight = height * scaleY;
       const score = (prediction.score * 100).toFixed(1);
       const label = `${prediction.class} ${score}%`;
+
+      // seg mask (draw first, under bbox)
+      if (prediction.maskCrop?.data && prediction.maskCrop.inputW && prediction.maskCrop.inputH) {
+        const mask = prediction.maskCrop;
+        const outW = Math.max(1, Math.round(dWidth));
+        const outH = Math.max(1, Math.round(dHeight));
+        const imgData = ctx.createImageData(outW, outH);
+        const rgba = imgData.data;
+
+        // nearest-neighbor sample from input mask crop to bbox display size
+        const srcW = mask.inputW;
+        const srcH = mask.inputH;
+        const src = mask.data;
+        const n = Number.parseInt(prediction.classId, 10);
+        const hue = Number.isFinite(n) ? (n * 47) % 360 : 200;
+        const { r, g, b, a } = hslaToRgba(hue, 95, 55, 0.38);
+
+        for (let oy = 0; oy < outH; oy++) {
+          const sy = Math.min(srcH - 1, Math.floor((oy / outH) * srcH));
+          for (let ox = 0; ox < outW; ox++) {
+            const sx = Math.min(srcW - 1, Math.floor((ox / outW) * srcW));
+            const on = src[sy * srcW + sx] ? 1 : 0;
+            if (!on) continue;
+            const p = (oy * outW + ox) * 4;
+            rgba[p + 0] = r;
+            rgba[p + 1] = g;
+            rgba[p + 2] = b;
+            rgba[p + 3] = a;
+          }
+        }
+
+        const px = Math.round(dx);
+        const py = Math.round(dy);
+        ctx.putImageData(imgData, px, py);
+      }
 
       ctx.strokeStyle = "#00FFFF";
       ctx.strokeRect(dx, dy, dWidth, dHeight);
@@ -324,7 +332,7 @@
       updateButtons();
 
       model = await tf.loadGraphModel(activeModelConfig.url);
-      classNames = await loadClassNames();
+      classNames = await loadClassNames(activeModelConfig);
 
       // Debug: 印出模型輸出資訊（pose/detect 可能輸出 tensor 意義不同）
       try {
@@ -349,10 +357,11 @@
             shape: t?.shape,
           })),
         );
-        const picked = pickScoresAndDetTensors(outputs);
+        const picked = pickYoloTensors(outputs);
         console.log("picked tensors:", {
           scores: { name: picked.scores?.name, dtype: picked.scores?.dtype, shape: picked.scores?.shape },
           det: { name: picked.det?.name, dtype: picked.det?.dtype, shape: picked.det?.shape },
+          proto: { name: picked.proto?.name, dtype: picked.proto?.dtype, shape: picked.proto?.shape },
         });
         console.groupEnd();
 
@@ -377,62 +386,6 @@
     }
   }
 
-  function normalizeModelOutputs(raw) {
-    // GraphModel.execute() 可能回傳：
-    // - Tensor[]
-    // - NamedTensorMap（key順序不保證）
-    // - Tensor
-    if (Array.isArray(raw)) return raw;
-
-    if (raw && typeof raw === "object" && !raw.dataSync) {
-      const map = raw;
-      const keys = Object.keys(map);
-
-      // 這兩個模型的 signature.outputs 會包含：
-      // - Identity:0
-      // - .../TopKV2:0
-      const topkKey = keys.find((k) => /TopKV2:0$/i.test(k));
-      const identityKey = keys.find((k) => /^Identity:0$/i.test(k) || /\/Identity:0$/i.test(k));
-
-      if (topkKey && identityKey) {
-        return [map[topkKey], map[identityKey]];
-      }
-
-      const values = Object.values(map);
-      if (values.length) return values;
-    }
-
-    if (raw) return [raw];
-    return [];
-  }
-
-  function pickScoresAndDetTensors(outputs) {
-    // 目標：在不同模型/不同輸出順序下，穩定挑出
-    // - scores tensor（通常 rank=2: [1, N]）
-    // - det tensor（通常 rank=3: [1, N, K]，且 K>=6）
-    if (!Array.isArray(outputs) || outputs.length < 2) return { scores: outputs?.[0], det: outputs?.[1] };
-
-    const a = outputs[0];
-    const b = outputs[1];
-    const aRank = Array.isArray(a?.shape) ? a.shape.length : null;
-    const bRank = Array.isArray(b?.shape) ? b.shape.length : null;
-
-    const aLast = aRank ? a.shape[aRank - 1] : null;
-    const bLast = bRank ? b.shape[bRank - 1] : null;
-
-    const aLooksLikeDet = (aRank === 3 && (aLast == null || aLast >= 6)) || (aRank === 2 && aLast >= 6);
-    const bLooksLikeDet = (bRank === 3 && (bLast == null || bLast >= 6)) || (bRank === 2 && bLast >= 6);
-
-    if (aLooksLikeDet && !bLooksLikeDet) return { scores: b, det: a };
-    if (bLooksLikeDet && !aLooksLikeDet) return { scores: a, det: b };
-
-    // 後備：rank 大的多半是 det
-    if ((aRank ?? 0) > (bRank ?? 0)) return { scores: b, det: a };
-    if ((bRank ?? 0) > (aRank ?? 0)) return { scores: a, det: b };
-
-    return { scores: a, det: b };
-  }
-
   async function loadAppVersion() {
     if (!appVersion) return;
     try {
@@ -450,110 +403,6 @@
     } catch {
       appVersion.textContent = "v?";
     }
-  }
-
-  async function runYolo(imageElement) {
-    if (!model) {
-      throw new Error("模型尚未載入");
-    }
-
-    return tf.tidy(() => {
-      let img = tf.browser.fromPixels(imageElement).toFloat();
-
-      img = tf.image.resizeBilinear(img, [activeModelConfig.inputSize, activeModelConfig.inputSize]);
-      img = img.expandDims(0).div(255.0);
-
-      const raw = model.execute(img);
-      const outputs = normalizeModelOutputs(raw);
-      const { scores: scoresTensor, det: detTensor } = pickScoresAndDetTensors(outputs);
-
-      if (!scoresTensor || !detTensor) {
-        console.warn("Unexpected YOLO output format:", raw);
-        throw new Error("YOLO 模型輸出格式與預期不同（需要至少 2 個 tensor）。");
-      }
-
-      const scoresArr = scoresTensor.dataSync();
-      const detArr = detTensor.dataSync();
-
-      const numDet = scoresArr.length;
-      const imgWidth =
-        imageElement.videoWidth || imageElement.naturalWidth || imageElement.width;
-      const imgHeight =
-        imageElement.videoHeight || imageElement.naturalHeight || imageElement.height;
-      const scaleX = imgWidth / activeModelConfig.inputSize;
-      const scaleY = imgHeight / activeModelConfig.inputSize;
-
-      const predictions = [];
-      const stride = Math.max(6, Math.floor(detArr.length / Math.max(1, numDet)));
-      const canParseKeypoints = stride > 6 && (stride - 6) % 3 === 0;
-      const numKeypoints = canParseKeypoints ? (stride - 6) / 3 : 0;
-      if (typeof window !== "undefined") {
-        // Debug: 用 collapsed group 避免刷屏
-        console.groupCollapsed?.(`[tf-webcam] runYolo debug (${activeModelConfig.id})`);
-        console.log("scoresTensor:", {
-          name: scoresTensor?.name,
-          dtype: scoresTensor?.dtype,
-          shape: scoresTensor?.shape,
-          sample: Array.from(scoresArr.slice(0, Math.min(5, scoresArr.length))),
-        });
-        console.log("detTensor:", {
-          name: detTensor?.name,
-          dtype: detTensor?.dtype,
-          shape: detTensor?.shape,
-          sample: Array.from(detArr.slice(0, Math.min(12, detArr.length))),
-        });
-        console.log("numDet:", numDet, "detArr.length:", detArr.length, "stride:", stride, "numKeypoints:", numKeypoints);
-        console.groupEnd?.();
-      }
-
-      for (let i = 0; i < numDet; i++) {
-        const base = i * stride;
-        if (base + 5 >= detArr.length) break;
-
-        const x1 = detArr[base + 0];
-        const y1 = detArr[base + 1];
-        const x2 = detArr[base + 2];
-        const y2 = detArr[base + 3];
-        const scoreFromDet = detArr[base + 4];
-        const clsId = detArr[base + 5];
-        const clsIndex = Number.isFinite(clsId) ? Math.round(clsId) : Number(clsId);
-        const classLabel =
-          (classNames && Number.isInteger(clsIndex) && classNames[clsIndex]) ||
-          String(clsIndex);
-
-        const score = Math.max(scoresArr[i] ?? 0, scoreFromDet ?? 0);
-        if (score < SCORE_THRESHOLD) continue;
-
-        const x = x1 * scaleX;
-        const y = y1 * scaleY;
-        const wBox = (x2 - x1) * scaleX;
-        const hBox = (y2 - y1) * scaleY;
-
-        const prediction = {
-          bbox: [x, y, wBox, hBox],
-          class: classLabel,
-          classId: String(clsIndex),
-          score,
-        };
-
-        if (numKeypoints) {
-          const keypoints = [];
-          for (let k = 0; k < numKeypoints; k++) {
-            const off = base + 6 + k * 3;
-            if (off + 2 >= detArr.length) break;
-            const kx = detArr[off + 0] * scaleX;
-            const ky = detArr[off + 1] * scaleY;
-            const ks = detArr[off + 2];
-            keypoints.push({ x: kx, y: ky, score: ks });
-          }
-          prediction.keypoints = keypoints;
-        }
-
-        predictions.push(prediction);
-      }
-
-      return predictions;
-    });
   }
 
   async function detectForElement(sourceElement, modeLabel) {
@@ -576,7 +425,7 @@
 
       syncCanvasSizeFor(sourceElement);
       const { scaleX, scaleY } = getDrawScaleFor(sourceElement);
-      const predictions = await runYolo(sourceElement);
+      const predictions = await runYolo(model, sourceElement, activeModelConfig, classNames);
       drawPredictions(predictions, scaleX, scaleY);
       renderResults(predictions);
 
@@ -696,7 +545,7 @@
     try {
       syncCanvasSizeFor(video);
       const { scaleX, scaleY } = getDrawScaleFor(video);
-      const predictions = await runYolo(video);
+      const predictions = await runYolo(model, video, activeModelConfig, classNames);
       drawPredictions(predictions, scaleX, scaleY);
       renderResults(predictions);
       setBadge("ok", "即時中");

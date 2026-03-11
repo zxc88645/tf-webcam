@@ -17,6 +17,7 @@
         <select id="modelSelect" aria-label="選擇模型">
           <option value="pose" selected>YOLOv26n Pose</option>
           <option value="detect">YOLOv26n Detect</option>
+          <option value="seg">YOLOv26n Seg</option>
         </select>
       </label>
       <input type="file" id="fileInput" accept="image/*" />
@@ -51,6 +52,6 @@
 
   <!-- TF.js (for YOLO SavedModel -> TF.js GraphModel) -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-  <script src="./app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
