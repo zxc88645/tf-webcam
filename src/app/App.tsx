@@ -373,6 +373,18 @@ export function App() {
           id="stage"
           aria-label="畫面區"
         >
+          {viewMode === "image" && !imageUrl && (
+            <div className="relative z-10 grid min-h-[320px] place-items-center p-6 text-center">
+              <div>
+                <div className="text-sm font-medium text-slate-900">
+                  尚未選擇圖片
+                </div>
+                <div className="mt-1 text-xs text-slate-600">
+                  請使用上方「選擇檔案」上傳圖片以開始預覽與偵測
+                </div>
+              </div>
+            </div>
+          )}
           <img
             id="image"
             ref={imageRef}
