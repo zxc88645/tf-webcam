@@ -86,6 +86,7 @@ export function App() {
   const canDetectImage = model.state.status === "ready" && !isCameraRunning;
   const canLiveDetect = model.state.status === "ready" && isCameraRunning;
   const canCaptureDetect = model.state.status === "ready" && isCameraRunning;
+  const loadingState = model.state.status === "loading" ? model.state : null;
 
   async function nextPaint() {
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
@@ -189,11 +190,13 @@ export function App() {
     raf: 0 as number | 0,
     running: false,
     processing: false,
+    lastError: "",
   });
 
   function stopLiveDetect() {
     const st = liveDetectRef.current;
     st.running = false;
+    st.lastError = "";
     if (st.raf) cancelAnimationFrame(st.raf);
     st.raf = 0;
   }
@@ -206,6 +209,7 @@ export function App() {
     const st = liveDetectRef.current;
     if (st.running) return;
     st.running = true;
+    st.lastError = "";
 
     const tick = () => {
       st.raf = requestAnimationFrame(tick);
@@ -235,8 +239,24 @@ export function App() {
             scaleY,
           });
         }
-      } catch {
-        // ignore per-frame
+        if (st.lastError) {
+          st.lastError = "";
+          setTone("ok");
+          setStatusText(`模型已就緒：${activeModelConfig.label}`);
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "未知錯誤，請查看主控台";
+        const debugMessage = `即時偵測失敗：${message}`;
+        console.error("[live-detect]", err);
+        st.running = false;
+        if (st.raf) cancelAnimationFrame(st.raf);
+        st.raf = 0;
+        if (st.lastError !== debugMessage) {
+          st.lastError = debugMessage;
+          setTone("warn");
+          setStatusText(debugMessage);
+        }
       } finally {
         st.processing = false;
       }
@@ -321,17 +341,16 @@ export function App() {
               </div>
             </div>
             <div className="text-sm text-slate-700 mb-4">
-              {model.state.message}
+              {loadingState?.message}
             </div>
-            {model.state.status === "loading" &&
-              model.state.progress !== undefined && (
-                <div className="w-full bg-slate-200 rounded-full h-2">
-                  <div
-                    className="bg-cyan-500 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${model.state.progress * 100}%` }}
-                  ></div>
-                </div>
-              )}
+            {loadingState?.progress !== undefined && (
+              <div className="w-full bg-slate-200 rounded-full h-2">
+                <div
+                  className="bg-cyan-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${loadingState.progress * 100}%` }}
+                ></div>
+              </div>
+            )}
             <div className="mt-4 text-xs text-slate-500">
               請稍候，不要關閉頁面
             </div>
@@ -434,7 +453,12 @@ export function App() {
         </button>
         <button
           id="captureButton"
-          disabled={!canCaptureDetect || isDetecting || isStartingCamera}
+          disabled={
+            !canCaptureDetect ||
+            isDetecting ||
+            isStartingCamera ||
+            liveDetectRef.current.running
+          }
           onClick={() => void captureAndDetect()}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -574,13 +598,13 @@ export function App() {
             </div>
             <div className="mb-4">
               <div className="mb-2 text-sm text-slate-700">
-                {model.state.message}
+                {loadingState?.message}
               </div>
-              {model.state.progress !== undefined && (
+              {loadingState?.progress !== undefined && (
                 <div className="w-full bg-slate-200 rounded-full h-2">
                   <div
                     className="bg-cyan-500 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${model.state.progress * 100}%` }}
+                    style={{ width: `${loadingState.progress * 100}%` }}
                   />
                 </div>
               )}
