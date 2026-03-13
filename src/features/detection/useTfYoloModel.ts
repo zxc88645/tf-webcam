@@ -9,7 +9,7 @@ import type { ModelConfig as CoreModelConfig } from "../../lib/yolo/types";
 
 type ModelState =
   | { status: "idle" }
-  | { status: "loading"; message: string }
+  | { status: "loading"; message: string; progress?: number }
   | { status: "ready"; model: GraphModel; classNames: string[] | null }
   | { status: "error"; message: string };
 
@@ -65,14 +65,23 @@ export function useTfYoloModel(activeModelConfig: ModelConfig) {
         setState({
           status: "loading",
           message: `載入模型：${activeModelConfig.label}（下載/解析）…`,
+          progress: 0,
         });
         const model = (await tf.loadGraphModel(activeModelConfig.url, {
           fromTFHub: false,
+          onProgress: (fraction: number) => {
+            setState({
+              status: "loading",
+              message: `載入模型：${activeModelConfig.label}（下載/解析）… ${Math.round(fraction * 100)}%`,
+              progress: fraction,
+            });
+          },
         })) as GraphModel;
 
         setState({
           status: "loading",
           message: `載入模型：${activeModelConfig.label}（載入標籤）…`,
+          progress: 0.9,
         });
         const names = await loadClassNames(toCoreConfig(activeModelConfig));
 
@@ -81,6 +90,7 @@ export function useTfYoloModel(activeModelConfig: ModelConfig) {
           setState({
             status: "loading",
             message: `載入模型：${activeModelConfig.label}（warmup）…`,
+            progress: 0.95,
           });
           tf.tidy(() => {
             const x = tf.zeros(

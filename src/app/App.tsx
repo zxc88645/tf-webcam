@@ -25,6 +25,7 @@ export function App() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [lastDetectMs, setLastDetectMs] = useState<number | null>(null);
   const [isStartingCamera, setIsStartingCamera] = useState(false);
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
 
   const imageRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -64,15 +65,19 @@ export function App() {
     if (model.state.status === "loading") {
       setTone("ok");
       setStatusText(model.state.message);
+      setShowLoadingModal(true);
     } else if (model.state.status === "ready") {
       setTone("ok");
       setStatusText(`模型就緒：${activeModelConfig.label}`);
+      setShowLoadingModal(false);
     } else if (model.state.status === "error") {
       setTone("warn");
       setStatusText(model.state.message);
+      setShowLoadingModal(false);
     } else {
       setTone("ok");
       setStatusText("初始化中");
+      setShowLoadingModal(false);
     }
   }, [activeModelConfig.label, model.state]);
 
@@ -305,6 +310,35 @@ export function App() {
         上傳圖片或開啟相機，使用 YOLO 模型進行物件偵測。
       </p>
 
+      {/* Loading Modal */}
+      {showLoadingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-lg">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-cyan-500" />
+              <div className="text-lg font-medium text-slate-900">
+                載入模型中
+              </div>
+            </div>
+            <div className="text-sm text-slate-700 mb-4">
+              {model.state.message}
+            </div>
+            {model.state.status === "loading" &&
+              model.state.progress !== undefined && (
+                <div className="w-full bg-slate-200 rounded-full h-2">
+                  <div
+                    className="bg-cyan-500 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${model.state.progress * 100}%` }}
+                  ></div>
+                </div>
+              )}
+            <div className="mt-4 text-xs text-slate-500">
+              請稍候，不要關閉頁面
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-sm"
         aria-label="操作區"
@@ -452,13 +486,11 @@ export function App() {
             className="pointer-events-none absolute left-0 top-0 z-20 block"
           />
 
-          {(model.state.status === "loading" || isDetecting) && (
+          {isDetecting && (
             <div className="absolute inset-0 z-30 grid place-items-center bg-white/55 backdrop-blur-[1px]">
               <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-cyan-500" />
-                <div className="text-sm text-slate-800">
-                  {isDetecting ? "辨識中…" : "載入中…"}
-                </div>
+                <div className="text-sm text-slate-800">辨識中…</div>
               </div>
             </div>
           )}
@@ -529,6 +561,36 @@ export function App() {
           </ol>
         </aside>
       </section>
+
+      {/* 模型載入進度彈窗 */}
+      {model.state.status === "loading" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-cyan-500" />
+              <h3 className="text-lg font-semibold text-slate-900">
+                載入模型中
+              </h3>
+            </div>
+            <div className="mb-4">
+              <div className="mb-2 text-sm text-slate-700">
+                {model.state.message}
+              </div>
+              {model.state.progress !== undefined && (
+                <div className="w-full bg-slate-200 rounded-full h-2">
+                  <div
+                    className="bg-cyan-500 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${model.state.progress * 100}%` }}
+                  />
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              請稍候，下載過程中請勿關閉頁面或切換模型…
+            </p>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
