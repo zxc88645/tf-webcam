@@ -25,6 +25,7 @@ export function App() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [lastDetectMs, setLastDetectMs] = useState<number | null>(null);
   const [isStartingCamera, setIsStartingCamera] = useState(false);
+  const [isLiveDetecting, setIsLiveDetecting] = useState(false);
   const [showLoadingModal, setShowLoadingModal] = useState(false);
 
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -196,6 +197,7 @@ export function App() {
   function stopLiveDetect() {
     const st = liveDetectRef.current;
     st.running = false;
+    setIsLiveDetecting(false);
     st.lastError = "";
     if (st.raf) cancelAnimationFrame(st.raf);
     st.raf = 0;
@@ -209,6 +211,7 @@ export function App() {
     const st = liveDetectRef.current;
     if (st.running) return;
     st.running = true;
+    setIsLiveDetecting(true);
     st.lastError = "";
 
     const tick = () => {
@@ -250,6 +253,7 @@ export function App() {
         const debugMessage = `即時偵測失敗：${message}`;
         console.error("[live-detect]", err);
         st.running = false;
+        setIsLiveDetecting(false);
         if (st.raf) cancelAnimationFrame(st.raf);
         st.raf = 0;
         if (st.lastError !== debugMessage) {
@@ -372,9 +376,7 @@ export function App() {
             aria-label="選擇模型"
             value={activeModelKey}
             onChange={(e) => setActiveModelKey(e.target.value as ModelKey)}
-            disabled={
-              isDetecting || isStartingCamera || liveDetectRef.current.running
-            }
+            disabled={isDetecting || isStartingCamera || isLiveDetecting}
             className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="pose">YOLOv26n Pose</option>
@@ -391,7 +393,7 @@ export function App() {
             model.state.status !== "ready" ||
             isDetecting ||
             isStartingCamera ||
-            liveDetectRef.current.running
+            isLiveDetecting
           }
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -406,7 +408,7 @@ export function App() {
             !canDetectImage ||
             !imageUrl ||
             isDetecting ||
-            liveDetectRef.current.running ||
+            isLiveDetecting ||
             isStartingCamera
           }
           onClick={() => void detectOnImage()}
@@ -445,11 +447,11 @@ export function App() {
           id="liveDetectButton"
           disabled={!canLiveDetect || isDetecting || isStartingCamera}
           onClick={() =>
-            liveDetectRef.current.running ? stopLiveDetect() : startLiveDetect()
+            isLiveDetecting ? stopLiveDetect() : startLiveDetect()
           }
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {liveDetectRef.current.running ? "停止即時偵測" : "開始即時偵測"}
+          {isLiveDetecting ? "停止即時偵測" : "開始即時偵測"}
         </button>
         <button
           id="captureButton"
@@ -457,7 +459,7 @@ export function App() {
             !canCaptureDetect ||
             isDetecting ||
             isStartingCamera ||
-            liveDetectRef.current.running
+            isLiveDetecting
           }
           onClick={() => void captureAndDetect()}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:opacity-60"
@@ -558,7 +560,7 @@ export function App() {
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            {liveDetectRef.current.running && (
+            {isLiveDetecting && (
               <span className="rounded-full border border-slate-200 bg-white px-2 py-1">
                 即時偵測中
               </span>
