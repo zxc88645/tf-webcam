@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ModelKey } from "../features/detection/modelConfigs";
 import { MODEL_CONFIGS } from "../features/detection/modelConfigs";
 import { useTfYoloModel } from "../features/detection/useTfYoloModel";
@@ -197,7 +198,10 @@ export function App() {
   function stopLiveDetect() {
     const st = liveDetectRef.current;
     st.running = false;
-    setIsLiveDetecting(false);
+    // Ensure UI updates immediately (e.g., button text) when stopping.
+    flushSync(() => {
+      setIsLiveDetecting(false);
+    });
     st.lastError = "";
     if (st.raf) cancelAnimationFrame(st.raf);
     st.raf = 0;
@@ -211,7 +215,10 @@ export function App() {
     const st = liveDetectRef.current;
     if (st.running) return;
     st.running = true;
-    setIsLiveDetecting(true);
+    // Ensure the UI updates immediately (e.g., button text) before heavy work begins.
+    flushSync(() => {
+      setIsLiveDetecting(true);
+    });
     st.lastError = "";
 
     const tick = () => {
