@@ -336,7 +336,7 @@ export function App() {
             liveDetectRef.current.running
           }
           onClick={() => void detectOnImage()}
-          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isDetecting && viewMode === "image" ? "辨識中…" : "執行物件偵測"}
         </button>
@@ -352,7 +352,7 @@ export function App() {
             id="cameraButton"
             disabled={!canStartCamera || isDetecting || isCameraUnavailable}
             onClick={() => void startCamera()}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 disabled:opacity-100"
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 disabled:opacity-100"
           >
             開啟相機
           </button>
@@ -363,7 +363,7 @@ export function App() {
           onClick={() =>
             liveDetectRef.current.running ? stopLiveDetect() : startLiveDetect()
           }
-          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {liveDetectRef.current.running ? "停止即時偵測" : "開始即時偵測"}
         </button>
@@ -371,7 +371,7 @@ export function App() {
           id="captureButton"
           disabled={!canCaptureDetect || isDetecting}
           onClick={() => void captureAndDetect()}
-          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isDetecting && viewMode === "video" ? "辨識中…" : "拍照偵測"}
         </button>
