@@ -24,6 +24,7 @@ export function App() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [lastDetectMs, setLastDetectMs] = useState<number | null>(null);
+  const [isStartingCamera, setIsStartingCamera] = useState(false);
 
   const imageRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -78,7 +79,6 @@ export function App() {
   const isCameraRunning = camera.state.status === "running";
   const isCameraUnavailable = camera.capability.status === "unavailable";
   const canDetectImage = model.state.status === "ready" && !isCameraRunning;
-  const canStartCamera = model.state.status === "ready" && !isCameraRunning;
   const canLiveDetect = model.state.status === "ready" && isCameraRunning;
   const canCaptureDetect = model.state.status === "ready" && isCameraRunning;
 
@@ -165,7 +165,19 @@ export function App() {
     setViewMode("video");
     clearOverlaySafe();
     setPredictions([]);
-    await camera.api.start();
+    setIsStartingCamera(true);
+    try {
+      await camera.api.start();
+    } finally {
+      setIsStartingCamera(false);
+    }
+  }
+
+  function stopCamera() {
+    camera.api.stop();
+    setViewMode("image");
+    clearOverlaySafe();
+    setPredictions([]);
   }
 
   const liveDetectRef = useRef({
@@ -307,7 +319,10 @@ export function App() {
             aria-label="選擇模型"
             value={activeModelKey}
             onChange={(e) => setActiveModelKey(e.target.value as ModelKey)}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200"
+            disabled={
+              isDetecting || isStartingCamera || liveDetectRef.current.running
+            }
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="pose">YOLOv26n Pose</option>
             <option value="detect">YOLOv26n Detect</option>
@@ -319,7 +334,12 @@ export function App() {
           type="file"
           id="fileInput"
           accept="image/*"
-          disabled={model.state.status !== "ready"}
+          disabled={
+            model.state.status !== "ready" ||
+            isDetecting ||
+            isStartingCamera ||
+            liveDetectRef.current.running
+          }
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) void onSelectFile(f);
@@ -333,7 +353,8 @@ export function App() {
             !canDetectImage ||
             !imageUrl ||
             isDetecting ||
-            liveDetectRef.current.running
+            liveDetectRef.current.running ||
+            isStartingCamera
           }
           onClick={() => void detectOnImage()}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:opacity-60"
@@ -350,16 +371,26 @@ export function App() {
         >
           <button
             id="cameraButton"
-            disabled={!canStartCamera || isDetecting || isCameraUnavailable}
-            onClick={() => void startCamera()}
+            disabled={
+              isStartingCamera ||
+              isCameraUnavailable ||
+              (isCameraRunning && isDetecting)
+            }
+            onClick={() =>
+              isCameraRunning ? stopCamera() : void startCamera()
+            }
             className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 disabled:opacity-100"
           >
-            開啟相機
+            {isStartingCamera
+              ? "啟動中…"
+              : isCameraRunning
+                ? "關閉相機"
+                : "開啟相機"}
           </button>
         </span>
         <button
           id="liveDetectButton"
-          disabled={!canLiveDetect || isDetecting}
+          disabled={!canLiveDetect || isDetecting || isStartingCamera}
           onClick={() =>
             liveDetectRef.current.running ? stopLiveDetect() : startLiveDetect()
           }
@@ -369,7 +400,7 @@ export function App() {
         </button>
         <button
           id="captureButton"
-          disabled={!canCaptureDetect || isDetecting}
+          disabled={!canCaptureDetect || isDetecting || isStartingCamera}
           onClick={() => void captureAndDetect()}
           className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:border-slate-300 active:bg-slate-100 active:shadow-inner transition-all duration-75 disabled:cursor-not-allowed disabled:opacity-60"
         >
